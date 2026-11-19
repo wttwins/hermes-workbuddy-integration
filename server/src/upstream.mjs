@@ -575,9 +575,13 @@ export async function fetchModels(cfg, site) {
   await ensureToken(cfg, site);
   const auth = getAuth(site);
   const timeoutMs = cfg.timeouts?.metaMs ?? 30000;
+  // 国际 CLI 从原生配置接口读取目录；其他站点保留既有接口。
+  const modelsPath = site === 'intl-cli'
+    ? '/v3/config'
+    : '/console/enterprises/personal/models';
   let res, text;
   try {
-    const r = await fetchWithTimeout(siteCfg.apiBase + '/console/enterprises/personal/models', {
+    const r = await fetchWithTimeout(siteCfg.apiBase + modelsPath, {
       timeoutMs,
       headers: { ...chatHeaders(siteCfg, auth), Accept: 'application/json' },
     });
