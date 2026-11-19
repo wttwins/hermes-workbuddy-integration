@@ -1,0 +1,24 @@
+# Build context allowlist: runtime data and credentials never enter the image.
+**
+!Dockerfile
+!.dockerignore
+!server/
+!server/server.mjs
+!server/package.json
+!server/LICENSE
+!server/src/
+!server/src/**
+!server/console/
+!server/console/**
+!docker/
+!docker/entrypoint.mjs
+!docker/healthcheck.mjs
+
+**/auth*.json
+**/config.json
+**/.env
+**/.env.*
+**/*.log
+**/*.bak*
+**/node_modules/**
+**/backups/**

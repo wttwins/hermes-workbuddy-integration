@@ -1,107 +1,156 @@
 name: CI
 
-# 这个项目零运行时依赖 —— 不需要 npm install 就能跑测试。
-# CI 刻意不做 install，本身就是对「零依赖」这句声明的持续验证。
-
 on:
   push:
     branches: [main, deepseek]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
     strategy:
-      # 不要 fail-fast：某个版本挂了也要看到其它版本的结果，
-      # 否则排查「是版本问题还是代码问题」时会缺信息。
       fail-fast: false
       matrix:
         node: ['18', '20', '22', '24']
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-
-      - name: 环境信息
+      - name: Runtime information
         run: |
           node --version
-          echo "package.json engines: $(node -p "require('./package.json').engines.node")"
-
-      # 语法检查：先快速失败，比等测试跑完再报语法错省时间
-      - name: 语法检查
+          node -p "require('./server/package.json').engines.node"
+      - name: Syntax checks
         run: |
-          fail=0
-          for f in server/*.mjs server/src/*.mjs; do
-            [ -e "$f" ] || continue
-            if ! node --check "$f"; then
-              echo "::error file=$f::语法检查失败"
-              fail=1
-            fi
+          for file in server/*.mjs server/src/*.mjs docker/*.mjs scripts/*.mjs; do
+            [ -e "$file" ] || continue
+            node --check "$file"
           done
-          exit $fail
-
-      # 不用 npm test：那条命令依赖 shell 展开 glob，直接写出来更明确；
-      # 也不加 --experimental-test-isolation，那个 flag 要 Node 22.8+。
-      - name: 跑测试（零依赖，无需 npm install）
+      - name: Full regression suite (zero dependencies)
         run: node --test --test-reporter=spec server/test/*.test.mjs
 
   zero-deps:
-    name: 零依赖声明校验
+    name: Zero dependency verification
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
-
-      # README 把「零依赖」当核心卖点，这里守住它别被无意破坏。
-      - name: package.json 不得声明任何依赖
+      - name: No declared runtime or development dependencies
         working-directory: server
         run: |
-          node -e '
-            const p = require("./package.json");
-            const deps = Object.keys(p.dependencies || {});
-            const dev = Object.keys(p.devDependencies || {});
-            if (deps.length || dev.length) {
-              console.error("❌ package.json 声明了依赖，与「零依赖」不符：");
-              console.error("   dependencies:", deps.join(", ") || "(无)");
-              console.error("   devDependencies:", dev.join(", ") || "(无)");
-              process.exit(1);
-            }
-            console.log("✅ dependencies / devDependencies 均为空");
-          '
-
-      - name: 仓库里不应出现 node_modules 或 lockfile
+          node -e 'const p=require("./package.json");if(Object.keys(p.dependencies||{}).length||Object.keys(p.devDependencies||{}).length)process.exit(1)'
+      - name: No node_modules or lockfiles committed
         run: |
-          found=0
-          for p in node_modules server/node_modules package-lock.json server/package-lock.json yarn.lock server/yarn.lock pnpm-lock.yaml server/pnpm-lock.yaml; do
-            if [ -e "$p" ]; then echo "::error::$p 不应被提交"; found=1; fi
+          for path in node_modules server/node_modules package-lock.json server/package-lock.json yarn.lock server/yarn.lock pnpm-lock.yaml server/pnpm-lock.yaml; do
+            if [ -e "$path" ]; then echo "::error::$path must not be committed"; exit 1; fi
           done
-          exit $found
-
-      - name: 没有 node_modules 也能正常导入全部模块
+      - name: All source modules import without installation
         working-directory: server
         run: |
-          node -e '
-            const { readdirSync } = require("node:fs");
-            const files = readdirSync("src").filter((f) => f.endsWith(".mjs"));
-            console.log("待导入模块:", files.length, "个");
-          '
-          node --input-type=module -e '
-            import { readdirSync } from "node:fs";
-            const files = readdirSync("src").filter((f) => f.endsWith(".mjs"));
-            let ok = 0;
-            for (const f of files) {
-              await import("./src/" + f);
-              ok++;
-            }
-            console.log("✅ 无 node_modules 下成功导入 " + ok + "/" + files.length + " 个模块");
-          '
+          node --input-type=module -e 'import{readdirSync}from"node:fs";for(const f of readdirSync("src").filter(f=>f.endsWith(".mjs")))await import("./src/"+f)'
+
+  container-test:
+    name: Container acceptance (${{ matrix.arch }})
+    needs: [test, zero-deps]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Build native image
+        run: docker build --tag workbuddy-openai-proxy:ci .
+      - name: Isolated ports, console login, persistence and SIGINT checks
+        env:
+          IMAGE_REF: workbuddy-openai-proxy:ci
+          TARGET_PLATFORM: linux/${{ matrix.arch }}
+        run: node scripts/docker-smoke.mjs
+
+  publish:
+    name: Publish multi-architecture image
+    needs: [test, zero-deps, container-test]
+    if: >-
+      github.repository == 'wttwins/hermes-workbuddy-integration' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Image and commit/version tags
+        id: image
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tags="${image}:sha-${GITHUB_SHA}"
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            tags+=$'\n'"${image}:latest"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo 'Unsupported version tag'; exit 1; }
+            tags+=$'\n'"${image}:${version}"
+          fi
+          {
+            echo "name=$image"
+            echo 'tags<<IMAGE_TAGS'
+            echo "$tags"
+            echo 'IMAGE_TAGS'
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=workbuddy-multiarch
+          cache-to: type=gha,mode=max,scope=workbuddy-multiarch
+          provenance: mode=max
+          sbom: true
+      - name: Verify published index architectures
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          INDEX_FILE: ${{ runner.temp }}/workbuddy-index.json
+        run: |
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --raw > "$INDEX_FILE"
+          python3 -c 'import json,os;d=json.load(open(os.environ["INDEX_FILE"]));a={m.get("platform",{}).get("architecture") for m in d.get("manifests",[]) if m.get("platform",{}).get("os")=="linux"};assert {"amd64","arm64"}.issubset(a),a;print("Published architectures:",sorted(a))'
+          echo "Published $IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"

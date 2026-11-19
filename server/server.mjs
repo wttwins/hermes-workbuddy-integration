@@ -1,8 +1,8 @@
 // 本地反代服务入口：把 WorkBuddy（CodeBuddy）账号能力暴露为
 //   - OpenAI 兼容：/v1/models、/v1/chat/completions
 //   - Anthropic 兼容：/v1/messages、/v1/messages/count_tokens
-//   - 控制台：/console（本机网页控制台）
-// 仅供本机（默认 127.0.0.1）使用，不读写本项目目录以外的任何文件。
+//   - 控制台：/console（默认仅本机，显式开关可允许认证后的远程管理）
+// 默认监听 127.0.0.1；控制台开关不改变监听地址、端口或模型 API。
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,6 +14,7 @@ import { handleResponses } from './src/responses.mjs';
 import { handleMessages, handleCountTokens } from './src/anthropic.mjs';
 import { queryCredit, supportsCreditQuery } from './src/upstream.mjs';
 import { handleConsoleApi } from './src/console-api.mjs';
+import { consoleOriginAllowed as checkConsoleOrigin, consoleCredentialAuthorized } from './src/console-access.mjs';
 import { flushUsage } from './src/usage.mjs';
 import { flushPool } from './src/pool.mjs';
 import { createRateLimiter } from './src/ratelimit.mjs';
@@ -66,6 +67,7 @@ function 来源标识(req) {
 
 function consoleAuthorized(req) {
   if ((req.headers['x-console-token'] || '') === CONSOLE_TOKEN) return true;
+  if (cfg.allowRemoteConsole === true) return consoleCredentialAuthorized(req, primaryKey(cfg));
   return authorized(req); // 也允许直接用 apiKey 调控制台接口（方便脚本）
 }
 
@@ -83,38 +85,9 @@ function consoleAuthorized(req) {
  *   - 其他一律拒绝
  * 同时校验 Host 头，抵御 DNS rebinding（恶意域名重绑定到 127.0.0.1 时 Host 仍是外部域名）。
  */
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-
-function isLoopbackHostname(hostname) {
-  const h = String(hostname || '').toLowerCase().replace(/\.$/, '');
-  if (LOOPBACK_HOSTNAMES.has(h)) return true;
-  // 127.0.0.0/8 整个网段都视作本机
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
-}
-
-/** 请求的 Host 是否指向本机（挡 DNS rebinding）。 */
-function hostIsLocal(req) {
-  const host = req.headers.host || '';
-  if (!host) return true; // HTTP/1.0 等无 Host 的场景，交由 Origin 判定
-  try {
-    const { hostname } = new URL(`http://${host}`);
-    return isLoopbackHostname(hostname);
-  } catch {
-    return false;
-  }
-}
-
-/** 控制台来源是否可信。 */
+/** 来源策略按运行时开关判定：关闭仅回环，开启只允许同源。 */
 function consoleOriginAllowed(req) {
-  if (!hostIsLocal(req)) return false;
-  const origin = req.headers.origin;
-  if (!origin) return true; // 同源导航 / 本机工具：不带 Origin
-  try {
-    const { hostname } = new URL(origin);
-    return isLoopbackHostname(hostname);
-  } catch {
-    return false;
-  }
+  return checkConsoleOrigin(req, cfg.allowRemoteConsole === true);
 }
 
 /** 汇总各站点登录状态。 */
@@ -168,7 +141,8 @@ const server = http.createServer(async (req, res) => {
       }
     } else {
       warn(`拒绝来自非本机来源的控制台请求：${req.method} ${pathname} origin=${req.headers.origin || '-'} host=${req.headers.host || '-'}`);
-      return sendError(res, 403, '控制台仅允许本机访问', 'console_forbidden');
+      return sendError(res, 403, cfg.allowRemoteConsole === true
+        ? '控制台只允许同源访问' : '远程控制台已关闭，仅允许本机访问', 'console_forbidden');
     }
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
@@ -221,6 +195,11 @@ const server = http.createServer(async (req, res) => {
 
     // 控制台页面（本机可达；页面内注入会话 token，不含 apiKey）
     if ((pathname === '/console' || pathname === '/console/') && req.method === 'GET') {
+      if (cfg.allowRemoteConsole === true && !consoleCredentialAuthorized(req, primaryKey(cfg))) {
+        res.setHeader('WWW-Authenticate', 'Basic realm="WorkBuddy Console", charset="UTF-8"');
+        res.setHeader('Cache-Control', 'no-store');
+        return sendError(res, 401, '控制台需要认证：用户名 admin，密码为网关主 API Key', 'console_auth_required');
+      }
       const file = path.join(CONSOLE_DIR, 'index.html');
       if (!fs.existsSync(file)) return sendError(res, 500, '控制台文件缺失：console/index.html');
       let html = fs.readFileSync(file, 'utf8');

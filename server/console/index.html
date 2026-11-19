@@ -318,6 +318,13 @@
     nav, main { padding-left: var(--sp-4); padding-right: var(--sp-4); }
     main { padding-bottom: 40px; }
   }
+  .remote-switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+  .remote-switch input { appearance: none; position: relative; width: 42px; height: 24px; padding: 0; margin: 0; flex-shrink: 0; border: 1px solid var(--line); border-radius: var(--r-full); background: var(--surface-2); cursor: pointer; }
+  .remote-switch input::before { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--fg-3); }
+  .remote-switch input:checked { background: var(--accent); border-color: var(--accent); }
+  .remote-switch input:checked::before { left: calc(100% - 19px); background: var(--accent-fg); }
+  .remote-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .remote-switch input:disabled { cursor: wait; opacity: .55; }
 </style>
 </head>
 <body>
@@ -424,7 +431,18 @@
 
   <!-- 服务 -->
   <section id="tab-service" class="hidden">
-    <div class="card">
+    <div class="card" id="remoteConsoleCard">
+      <h3>控制台访问</h3>
+      <div class="row">
+        <label class="remote-switch" for="remoteConsoleToggle">
+          <input type="checkbox" role="switch" id="remoteConsoleToggle" aria-describedby="remoteConsoleHelp" onchange="setRemoteConsole()" disabled />
+          <b>允许远程访问控制台</b>
+        </label>
+        <span id="remoteConsoleStatus" class="pill" role="status" aria-live="polite">读取中…</span>
+      </div>
+      <p class="hint" id="remoteConsoleHelp">默认关闭，仅本机可访问。开启后立即保存、生效；浏览器登录用户名 <code>admin</code>，密码为网关的<b>主 API Key</b>，不是 CodeBuddy 账号密码。<br>不影响模型 API，也不更改监听地址或端口；远程使用需监听可达地址，建议使用 HTTPS 或可信内网。</p>
+    </div>
+    <div class="card" style="margin-top:12px">
       <h3>服务信息</h3>
       <div class="kv"><span>版本 / Node</span><span id="svcVer"></span></div>
       <div class="kv"><span>运行时长</span><span id="svcUp"></span></div>
@@ -499,6 +517,32 @@ async function api(path, opts = {}) {
 }
 
 let STATE = null, MODELS = null, ALIASES = {}, loginSite = null;
+let remoteConsoleSaving = false;
+
+function renderRemoteConsole(enabled) {
+  $('remoteConsoleToggle').checked = enabled === true;
+  $('remoteConsoleStatus').textContent = enabled ? '已开启 · 需主 API Key 登录' : '已关闭 · 仅本机';
+  $('remoteConsoleStatus').className = 'pill' + (enabled ? ' ok' : '');
+}
+
+async function setRemoteConsole() {
+  const toggle = $('remoteConsoleToggle'), before = !toggle.checked;
+  remoteConsoleSaving = true;
+  toggle.disabled = true;
+  $('remoteConsoleStatus').textContent = '保存中…';
+  try {
+    const result = await api('/remote-console', { method: 'POST', body: { enabled: toggle.checked } });
+    if (STATE) STATE.allow_remote_console = result.enabled;
+    renderRemoteConsole(result.enabled);
+  } catch (e) {
+    toggle.checked = before;
+    $('remoteConsoleStatus').textContent = '保存失败：' + e.message;
+    $('remoteConsoleStatus').className = 'pill bad';
+  } finally {
+    remoteConsoleSaving = false;
+    toggle.disabled = false;
+  }
+}
 
 // ---------- 主题 ----------
 function applyTheme(t) {
@@ -548,6 +592,10 @@ async function loadState() {
   $('svcUp').textContent = fmtUptime(STATE.uptime_ms);
   $('svcHost').textContent = STATE.base_url;
   $('svcSite').textContent = STATE.default_site;
+  if (!remoteConsoleSaving) {
+    renderRemoteConsole(STATE.allow_remote_console === true);
+    $('remoteConsoleToggle').disabled = false;
+  }
 
   $('siteCards').innerHTML = STATE.sites.map((s) => `
     <div class="card">

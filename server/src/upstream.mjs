@@ -278,6 +278,8 @@ export async function openChat(cfg, site, body, { signal, exclude = [], accountI
   let res;
   let 最后错误;
   let 当前payload = payload;
+  // Retain the same conversation/message metadata for this call's retries.
+  const requestHeaders = chatHeaders(siteCfg, auth);
   let 压缩重试次数 = 0;
   const 最大压缩重试 = 3; // 上限未知时要从全量往下爬，多留一次
 
@@ -286,7 +288,7 @@ export async function openChat(cfg, site, body, { signal, exclude = [], accountI
       try {
         res = await fetch(siteCfg.apiBase + '/v2/chat/completions', {
           method: 'POST',
-          headers: chatHeaders(siteCfg, auth),
+          headers: requestHeaders,
           body: JSON.stringify(当前payload),
           signal: ac.signal,
         });

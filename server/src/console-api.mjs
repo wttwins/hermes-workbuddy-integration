@@ -135,10 +135,24 @@ export async function handleConsoleApi(ctx) {
       default_model: cfg.defaultModel,
       api_key_masked: maskKey(primaryKey(cfg)),
       api_key_count: authKeys(cfg).length,
+      allow_remote_console: cfg.allowRemoteConsole === true,
       base_url: `http://${cfg.host}:${cfg.port}/v1`,
       full_url: `http://${cfg.host}:${cfg.port}/v1/chat/completions`,
       sites,
     });
+  }
+
+  // ---- 远程控制台开关：只修改这一项，保存成功后才切换运行时状态 ----
+  if (p === '/remote-console' && method === 'GET') {
+    return sendJson(res, 200, { enabled: cfg.allowRemoteConsole === true });
+  }
+  if (p === '/remote-console' && method === 'POST') {
+    const enabled = ctx.body?.enabled;
+    if (typeof enabled !== 'boolean') return sendJson(res, 400, { error: 'enabled 必须是布尔值' });
+    if (enabled && !primaryKey(cfg)) return sendJson(res, 400, { error: '开启远程控制台前必须配置主 API Key' });
+    saveConfig({ ...cfg, allowRemoteConsole: enabled });
+    cfg.allowRemoteConsole = enabled;
+    return sendJson(res, 200, { ok: true, enabled });
   }
 
   // ---- 模型清单（含 default 虚拟模型） ----

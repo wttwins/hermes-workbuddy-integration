@@ -1,5 +1,5 @@
 // 上游请求头构造（站点感知）：对齐 CodeBuddy 官方 CLI 的调用形态。
-// 国内版与国际版协议同构，只有 origin / UA / 域名不同，均由站点配置提供。
+// 站点配置决定 origin / UA / 域名；会话字段按国际站所需的兼容形态发送。
 import crypto from 'node:crypto';
 
 /** 通用头（所有上游接口共用） */
@@ -19,7 +19,11 @@ export function chatHeaders(site, auth) {
   const h = commonHeaders(site);
   h.Accept = 'text/event-stream';
   h.Authorization = 'Bearer ' + auth.accessToken;
-  h['X-Request-ID'] = crypto.randomBytes(16).toString('hex');
+  h['X-Request-ID'] = crypto.randomUUID().replace(/-/g, '');
+  // Each stateless API call gets isolated metadata, not a shared global ID.
+  h['X-Conversation-Id'] = crypto.randomUUID();
+  h['X-Conversation-Request-Id'] = crypto.randomUUID().replace(/-/g, '');
+  h['X-Conversation-Message-Id'] = h['X-Request-ID'];
   h['X-Request-Trace-Id'] = crypto.randomUUID();
   h['X-Product'] = site.product || 'SaaS';
   if (auth.uid) h['X-User-Id'] = auth.uid;

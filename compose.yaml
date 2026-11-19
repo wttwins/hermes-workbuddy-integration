@@ -1,0 +1,28 @@
+services:
+  gateway:
+    image: "${IMAGE:-workbuddy-openai-proxy:local}"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      WB_CONFIG_DIR: /data
+      HOST: "${HOST:-0.0.0.0}"
+      PORT: "${PORT:-8788}"
+      ALLOW_REMOTE_CONSOLE: "${ALLOW_REMOTE_CONSOLE:-false}"
+      API_KEY: "${API_KEY:-}"
+      API_KEY_FILE: "${API_KEY_FILE:-}"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8788}:${PORT:-8788}"
+    volumes:
+      - "${DATA_DIR:-workbuddy-data}:/data"
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  workbuddy-data:

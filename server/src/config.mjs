@@ -147,6 +147,7 @@ export function defaultConfig() {
   return {
     host: '127.0.0.1', // 仅本机可访问，不对局域网暴露
     port: 8788,
+    allowRemoteConsole: false, // 默认关闭；开启远程控制台仍需主 API Key 管理鉴权
     apiKey: 'sk-wb-' + crypto.randomBytes(12).toString('hex'),
     defaultSite: 'cn-cli',
     defaultModel: 'deepseek-v4-pro',
@@ -276,6 +277,12 @@ export function validateConfig(cfg, defaults = defaultConfig()) {
     fix(`port 必须是 0-65535 的整数（当前 ${JSON.stringify(cfg.port)}），已回退为 ${defaults.port}`);
     cfg.port = defaults.port;
   }
+
+  // ---- 远程控制台：只有显式布尔 true 才能开启，非法类型一律关闭 ----
+  if (cfg.allowRemoteConsole !== undefined && !isBool(cfg.allowRemoteConsole)) {
+    fix('allowRemoteConsole 必须是布尔值，已回退为 false');
+  }
+  cfg.allowRemoteConsole = cfg.allowRemoteConsole === true;
 
   // ---- 密钥：可以是字符串，也可以是字符串数组。数组里每个都有效，方便同时给
   //      多个客户端（或演示环境）发不同的密钥，而不用来回改 + 重启。
