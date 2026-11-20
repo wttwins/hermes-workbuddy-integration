@@ -66,6 +66,7 @@ export const SITE_PRESETS = {
   'cn-cli': {
     label: '国内版 CLI（copilot.tencent.com）',
     enabled: true,
+    labelFreeModels: true, // /v1/models：已知零倍率的展示名称追加 (Free)，不改变 ID
     apiBase: 'https://copilot.tencent.com',
     billingBase: 'https://www.codebuddy.cn',
     origin: 'https://www.codebuddy.cn',
@@ -75,6 +76,7 @@ export const SITE_PRESETS = {
   'intl-cli': {
     label: '国际版 CLI（codebuddy.ai）',
     enabled: true,
+    labelFreeModels: true,
     apiBase: 'https://www.codebuddy.ai',
     billingBase: 'https://www.codebuddy.ai',
     origin: 'https://www.codebuddy.ai',
@@ -110,6 +112,7 @@ export const SITE_PRESETS = {
   'intl-work': {
     label: '国际版 WorkBuddy（workbuddy.ai）',
     enabled: true,
+    labelFreeModels: true,
     apiBase: 'https://www.workbuddy.ai',
     billingBase: 'https://www.workbuddy.ai',
     origin: 'https://www.workbuddy.ai',
@@ -485,6 +488,10 @@ export function validateConfig(cfg, defaults = defaultConfig()) {
       if (site.enabled !== undefined && !isBool(site.enabled)) {
         fix(`sites.${key}.enabled 必须是布尔值，已回退为 true`);
         site.enabled = true;
+      }
+      if (site.labelFreeModels !== undefined && !isBool(site.labelFreeModels)) {
+        fix(`sites.${key}.labelFreeModels 必须是布尔值，已回退为 true`);
+        site.labelFreeModels = true;
       }
       if (site.seedModels !== undefined && !Array.isArray(site.seedModels)) {
         fix(`sites.${key}.seedModels 必须是数组，已回退为 []`);

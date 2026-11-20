@@ -5,6 +5,7 @@ import { ensureToken } from './auth.mjs';
 import { isQuotaError } from './pool.mjs';
 import { resolveTarget, mergedModels, parseMultiplier, isExcluded } from './router.mjs';
 import { recordUsage } from './usage.mjs';
+import { withFreeLabel } from './model-display.mjs';
 import { startSSE, writeSSE, sendJson, sendError, estimateTokens } from './util.mjs';
 import { requestLog, warn } from './log.mjs';
 
@@ -346,6 +347,8 @@ export async function handleModels(ctx) {
       const mult = parseMultiplier(info.credits);
       if (Number.isFinite(mult)) item.credits_multiplier = mult;
     }
+    // 仅在响应边界修饰 name；id、目录原始信息及模型映射一律不动。
+    item.name = withFreeLabel(item.name, item.credits_multiplier, cfg.sites?.[m.site]?.labelFreeModels ?? true);
     if (info.contextWindow) item.context_window = info.contextWindow;
     if (info.maxTokens) item.max_output_tokens = info.maxTokens;
     if (info.supportsImages) item.supports_images = true;

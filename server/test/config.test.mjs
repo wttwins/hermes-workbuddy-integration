@@ -40,6 +40,37 @@ describe('validateConfig：合法配置不应被改动', () => {
   });
 });
 
+describe('validateConfig：免费模型展示开关', () => {
+  test('预设站点默认启用零倍率名称标注', () => {
+    const cfg = good();
+    for (const site of ['cn-cli', 'intl-cli', 'intl-work']) {
+      assert.equal(cfg.sites[site].labelFreeModels, true);
+    }
+    assert.deepEqual(validateConfig(cfg), []);
+  });
+
+  test('显式 false 被保留，且不改变任何模型映射', () => {
+    const cfg = good();
+    cfg.sites['intl-cli'].labelFreeModels = false;
+    cfg.defaultModel = 'hy3';
+    cfg.modelAliases = { fast: 'hy3' };
+    cfg.modelRoutes = { hy3: 'intl-cli' };
+    const before = JSON.stringify(cfg);
+    assert.deepEqual(validateConfig(cfg), []);
+    assert.equal(JSON.stringify(cfg), before);
+  });
+
+  for (const value of [null, 'false', 0, 1, {}, []]) {
+    test(`非法展示开关 ${JSON.stringify(value)} 被安全修正`, () => {
+      const cfg = good();
+      cfg.sites['intl-cli'].labelFreeModels = value;
+      const issues = validateConfig(cfg);
+      assert.equal(cfg.sites['intl-cli'].labelFreeModels, true);
+      assert.ok(issues.some(issue => issue.includes('sites.intl-cli.labelFreeModels')));
+    });
+  }
+});
+
 describe('validateConfig：端口与监听地址', () => {
   const cases = [
     ['字符串端口', 'abc'],
